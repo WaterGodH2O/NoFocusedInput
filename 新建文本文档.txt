@@ -1,0 +1,6 @@
+adb shell "am broadcast -a com.example.nofocusinput.ACTION_DEMO_BROADCAST -n com.example.nofocusinput/.DemoBroadcastReceiver --es text 'hewqowdadwadwadaw fromwd'"
+
+
+
+
+adb shell "am broadcast -a com.example.nofocusinput.ACTION_DUMP_NODES -n com.example.nofocusinput/.DemoBroadcastReceiver"

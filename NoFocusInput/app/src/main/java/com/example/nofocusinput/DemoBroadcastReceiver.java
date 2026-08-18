@@ -10,7 +10,9 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
 
     public static final String ACTION = "com.example.nofocusinput.ACTION_DEMO_BROADCAST";
     public static final String ACTION_DUMP_NODES = "com.example.nofocusinput.ACTION_DUMP_NODES";
+    public static final String ACTION_SET_TEXT = "com.example.nofocusinput.ACTION_SET_TEXT";
     public static final String EXTRA_TEXT = "text";
+    public static final String EXTRA_VIEW_ID = "id";
     public static final String EXTRA_ALL_DISPLAYS = "allDisplays";
     private static final String TAG = "DemoBroadcast";
 
@@ -37,12 +39,29 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         Log.i(TAG, "received action=" + action + " serviceRunning=" + InputAccessibilityService.isRunning());
 
+        if (intent.hasExtra(EXTRA_ALL_DISPLAYS)) {
+            InputAccessibilityService.setDumpAllDisplays(
+                    intent.getBooleanExtra(EXTRA_ALL_DISPLAYS, false));
+        }
+
+        // 按 id 找到输入框并写入 text，不更新本 App 的 Demo 输入框
+        if (ACTION_SET_TEXT.equals(action)) {
+            String viewId = intent.getStringExtra(EXTRA_VIEW_ID);
+            if (viewId == null || viewId.isEmpty()) {
+                Log.w(TAG, "skip setText: missing extra id");
+                return;
+            }
+            if (!intent.hasExtra(EXTRA_TEXT)) {
+                Log.w(TAG, "skip setText: missing extra text");
+                return;
+            }
+            String text = readPayload(intent);
+            InputAccessibilityService.setTextByViewId(viewId, text);
+            return;
+        }
+
         // ACTION_DUMP_NODES 和 ACTION_DEMO_BROADCAST 都会 dump 可编辑节点
         if (ACTION_DUMP_NODES.equals(action) || ACTION.equals(action)) {
-            if (intent.hasExtra(EXTRA_ALL_DISPLAYS)) {
-                InputAccessibilityService.setDumpAllDisplays(
-                        intent.getBooleanExtra(EXTRA_ALL_DISPLAYS, false));
-            }
             InputAccessibilityService.dumpEditableNodes();
         }
 

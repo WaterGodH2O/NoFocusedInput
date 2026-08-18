@@ -4,3 +4,25 @@ adb shell "am broadcast -a com.example.nofocusinput.ACTION_DEMO_BROADCAST -n com
 
 
 adb shell "am broadcast -a com.example.nofocusinput.ACTION_DUMP_NODES -n com.example.nofocusinput/.DemoBroadcastReceiver"
+
+
+adb shell am broadcast -a com.example.nofocusinput.ACTION_SET_TEXT --es id "edit_broadcast" --es text "hello"
+adb shell am broadcast -a com.example.nofocusinput.ACTION_SET_TEXT --es id "com.example.nofocusinput:id/edit_broadcast" --es text "hello"
+
+
+
+adb shell am broadcast -a com.example.nofocusinput.ACTION_SET_TEXT --es id "title" --es text "hello"
+
+
+com.huawei.calendar:id/title
+adb shell am broadcast -a com.example.nofocusinput.ACTION_SET_TEXT --es id "com.huawei.calendar:id/title" --es text "hello"
+
+
+
+adb shell "am broadcast -n com.example.nofocusinput/.DemoBroadcastReceiver -a com.example.nofocusinput.ACTION_SET_TEXT --es id 'title' --es text 'hello ww'"
+
+要用引号把命令包住
+
+
+
+

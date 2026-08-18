@@ -6,6 +6,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
+import android.os.Bundle;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.accessibility.AccessibilityEvent;
@@ -19,6 +20,7 @@ public class InputAccessibilityService extends AccessibilityService {
 
     private static final String TAG = "InputA11y";
     private static final String DUMP_TAG = "NodeDump";
+    private static final String SET_TAG = "SetText";
 
     private static InputAccessibilityService instance;
     private static boolean dumpAllDisplays = false;
@@ -66,7 +68,25 @@ public class InputAccessibilityService extends AccessibilityService {
             Log.w(DUMP_TAG, "skip dump: accessibility service not connected");
             return;
         }
+        
         service.dumpEditableNodesInternal();
+    }
+
+    /**
+     * 按 viewId 找到可写入节点并设置文本。
+     * id 可以是完整资源名（pkg:id/name）或短名（name）。
+     */
+    public static void setTextByViewId(String viewId, String text) {
+        if (viewId == null || viewId.isEmpty()) {
+            Log.w(SET_TAG, "skip setText: id is empty");
+            return;
+        }
+        InputAccessibilityService service = instance;
+        if (service == null) {
+            Log.w(SET_TAG, "skip setText: accessibility service not connected");
+            return;
+        }
+        service.setTextByViewIdInternal(viewId, text == null ? "" : text);
     }
 
     /**
@@ -194,6 +214,117 @@ public class InputAccessibilityService extends AccessibilityService {
                 + " focused=" + node.isFocused()
                 + " password=" + node.isPassword()
                 + " editable=" + node.isEditable();
+    }
+
+    /**
+     * 按 dumpAllDisplays 选择扫哪些窗口。
+     * counts[0] 匹配到的 id 数量，counts[1] 写入成功数量。
+     */
+    private void setTextByViewIdInternal(String viewId, String text) {
+        String id = normalizeViewId(viewId);
+        int[] counts = new int[] {0, 0};
+        Log.i(SET_TAG, "setText id=" + id + " text=" + quote(text)
+                + " mode=" + (dumpAllDisplays ? "allDisplays" : "default"));
+        if (dumpAllDisplays) {
+            setTextOnAllDisplays(id, text, counts);
+        } else {
+            setTextOnDefaultDisplay(id, text, counts);
+        }
+        Log.i(SET_TAG, "done id=" + id + " matched=" + counts[0] + " written=" + counts[1]);
+    }
+
+    private void setTextOnDefaultDisplay(String viewId, String text, int[] counts) {
+        List<AccessibilityWindowInfo> windows = getWindows();
+        if (windows != null && !windows.isEmpty()) {
+            setTextInWindowList(windows, viewId, text, counts);
+        } else {
+            setTextInTree(getRootInActiveWindow(), viewId, text, counts);
+        }
+    }
+
+    private void setTextOnAllDisplays(String viewId, String text, int[] counts) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.w(SET_TAG, "allDisplays requires API 30, fallback to default display");
+            setTextOnDefaultDisplay(viewId, text, counts);
+            return;
+        }
+        SparseArray<List<AccessibilityWindowInfo>> byDisplay = getWindowsOnAllDisplays();
+        if (byDisplay == null || byDisplay.size() == 0) {
+            setTextOnDefaultDisplay(viewId, text, counts);
+            return;
+        }
+        for (int i = 0; i < byDisplay.size(); i++) {
+            setTextInWindowList(byDisplay.valueAt(i), viewId, text, counts);
+        }
+    }
+
+    private void setTextInWindowList(List<AccessibilityWindowInfo> windows, String viewId,
+            String text, int[] counts) {
+        if (windows == null) {
+            return;
+        }
+        for (int i = 0; i < windows.size(); i++) {
+            AccessibilityWindowInfo window = windows.get(i);
+            if (window == null) {
+                continue;
+            }
+            setTextInTree(window.getRoot(), viewId, text, counts);
+        }
+    }
+
+    /** 递归找匹配 id 的节点；可写入则执行 ACTION_SET_TEXT。 */
+    private void setTextInTree(AccessibilityNodeInfo node, String viewId, String text, int[] counts) {
+        if (node == null) {
+            return;
+        }
+        if (idMatches(node, viewId)) {
+            counts[0]++;
+            Log.i(SET_TAG, "matched " + formatNode(node, 0));
+            if (!canSetText(node)) {
+                Log.w(SET_TAG, "matched but not writable id=" + node.getViewIdResourceName());
+            } else if (performSetText(node, text)) {
+                counts[1]++;
+                Log.i(SET_TAG, "written id=" + node.getViewIdResourceName());
+            } else {
+                Log.w(SET_TAG, "performAction failed id=" + node.getViewIdResourceName());
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            setTextInTree(node.getChild(i), viewId, text, counts);
+        }
+    }
+
+    private static boolean performSetText(AccessibilityNodeInfo node, String text) {
+        Bundle args = new Bundle();
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+    }
+
+    private static String normalizeViewId(String viewId) {
+        if (viewId.startsWith("@+id/")) {
+            return viewId.substring(5);
+        }
+        if (viewId.startsWith("@id/")) {
+            return viewId.substring(4);
+        }
+        if (viewId.startsWith("id/")) {
+            return viewId.substring(3);
+        }
+        return viewId;
+    }
+
+    /** 完整资源名精确匹配；短名匹配资源名最后一段。 */
+    private static boolean idMatches(AccessibilityNodeInfo node, String wanted) {
+        String actual = node.getViewIdResourceName();
+        if (actual == null || wanted.isEmpty()) {
+            return false;
+        }
+        if (actual.equals(wanted)) {
+            return true;
+        }
+        int slash = actual.lastIndexOf('/');
+        String shortId = slash >= 0 ? actual.substring(slash + 1) : actual;
+        return wanted.equals(shortId);
     }
 
     private static String quote(CharSequence value) {

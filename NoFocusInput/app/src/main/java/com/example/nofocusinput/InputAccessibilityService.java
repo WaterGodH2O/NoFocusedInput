@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class InputAccessibilityService extends AccessibilityService {
@@ -23,7 +24,7 @@ public class InputAccessibilityService extends AccessibilityService {
     private static final String SET_TAG = "SetText";
 
     private static InputAccessibilityService instance;
-    private static boolean dumpAllDisplays = false;
+    private static boolean dumpAllDisplays = true;
 
     public static void setDumpAllDisplays(boolean allDisplays) {
         dumpAllDisplays = allDisplays;
@@ -61,15 +62,19 @@ public class InputAccessibilityService extends AccessibilityService {
         return instance != null;
     }
 
-    /** 对外入口：无障碍服务已连接时，把当前屏幕上可写入的节点打到 Logcat。 */
-    public static void dumpEditableNodes() {
+    /**
+     * 对外入口：无障碍服务已连接时，把当前屏幕上可写入的节点打到 Logcat。
+     * @return 可 SET_TEXT 且带完整资源 id 的控件列表（pkg:id/name）；服务未连接时返回空列表。
+     */
+    public static ArrayList<String> dumpEditableNodes() {
+        ArrayList<String> editableIds = new ArrayList<>();
         InputAccessibilityService service = instance;
         if (service == null) {
             Log.w(DUMP_TAG, "skip dump: accessibility service not connected");
-            return;
+            return editableIds;
         }
-        
-        service.dumpEditableNodesInternal();
+        service.dumpEditableNodesInternal(editableIds);
+        return editableIds;
     }
 
     /**
@@ -93,40 +98,41 @@ public class InputAccessibilityService extends AccessibilityService {
      * 按 dumpAllDisplays 选择扫默认屏还是所有屏。
      * counts[0] 扫过的节点数，counts[1] 其中可 setText 的节点数。
      */
-    private void dumpEditableNodesInternal() {
+    private void dumpEditableNodesInternal(ArrayList<String> editableIds) {
         int[] counts = new int[] {0, 0};
         if (dumpAllDisplays) {
-            dumpWindowsOnAllDisplays(counts);
+            dumpWindowsOnAllDisplays(counts, editableIds);
         } else {
-            dumpDefaultDisplay(counts);
+            dumpDefaultDisplay(counts, editableIds);
         }
         Log.i(DUMP_TAG, "done mode=" + (dumpAllDisplays ? "allDisplays" : "default")
-                + " scanned=" + counts[0] + " setText=" + counts[1]);
+                + " scanned=" + counts[0] + " setText=" + counts[1]
+                + " ids=" + editableIds.size());
     }
 
     /** 扫默认显示器上的窗口；拿不到窗口列表时退回当前活动窗口根节点。 */
-    private void dumpDefaultDisplay(int[] counts) {
+    private void dumpDefaultDisplay(int[] counts, ArrayList<String> editableIds) {
         List<AccessibilityWindowInfo> windows = getWindows();
         if (windows != null && !windows.isEmpty()) {
             Log.i(DUMP_TAG, "windows=" + windows.size());
-            dumpWindowList(windows, counts);
+            dumpWindowList(windows, counts, editableIds);
         } else {
             Log.i(DUMP_TAG, "windows empty, fallback to active root");
-            dumpNode(getRootInActiveWindow(), 0, counts);
+            dumpNode(getRootInActiveWindow(), 0, counts, editableIds);
         }
     }
 
     /** API 30+ 按显示器分组扫所有窗口；版本不够或结果为空时退回默认屏。 */
-    private void dumpWindowsOnAllDisplays(int[] counts) {
+    private void dumpWindowsOnAllDisplays(int[] counts, ArrayList<String> editableIds) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             Log.w(DUMP_TAG, "allDisplays requires API 30, fallback to default display");
-            dumpDefaultDisplay(counts);
+            dumpDefaultDisplay(counts, editableIds);
             return;
         }
         SparseArray<List<AccessibilityWindowInfo>> byDisplay = getWindowsOnAllDisplays();
         if (byDisplay == null || byDisplay.size() == 0) {
             Log.i(DUMP_TAG, "allDisplays empty, fallback to default display");
-            dumpDefaultDisplay(counts);
+            dumpDefaultDisplay(counts, editableIds);
             return;
         }
         Log.i(DUMP_TAG, "displays=" + byDisplay.size());
@@ -135,12 +141,13 @@ public class InputAccessibilityService extends AccessibilityService {
             List<AccessibilityWindowInfo> windows = byDisplay.valueAt(i);
             Log.i(DUMP_TAG, "displayId=" + displayId
                     + " windows=" + (windows == null ? 0 : windows.size()));
-            dumpWindowList(windows, counts);
+            dumpWindowList(windows, counts, editableIds);
         }
     }
 
     /** 遍历一组窗口，打印窗口信息，再从每个窗口的根节点开始扫控件树。 */
-    private void dumpWindowList(List<AccessibilityWindowInfo> windows, int[] counts) {
+    private void dumpWindowList(List<AccessibilityWindowInfo> windows, int[] counts,
+            ArrayList<String> editableIds) {
         if (windows == null) {
             return;
         }
@@ -157,12 +164,13 @@ public class InputAccessibilityService extends AccessibilityService {
                     + " title=" + window.getTitle()
                     + " active=" + window.isActive()
                     + displayPart);
-            dumpNode(window.getRoot(), 0, counts);
+            dumpNode(window.getRoot(), 0, counts, editableIds);
         }
     }
 
-    /** 递归遍历节点树：统计节点数，可写入的才打印详情。 */
-    private void dumpNode(AccessibilityNodeInfo node, int depth, int[] counts) {
+    /** 递归遍历节点树：统计节点数，可写入的才打印详情并收集完整资源 id。 */
+    private void dumpNode(AccessibilityNodeInfo node, int depth, int[] counts,
+            ArrayList<String> editableIds) {
         if (node == null) {
             return;
         }
@@ -170,9 +178,13 @@ public class InputAccessibilityService extends AccessibilityService {
         if (canSetText(node)) {
             counts[1]++;
             Log.i(DUMP_TAG, formatNode(node, depth));
+            String viewId = node.getViewIdResourceName();
+            if (viewId != null && !viewId.isEmpty()) {
+                editableIds.add(viewId);
+            }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
-            dumpNode(node.getChild(i), depth + 1, counts);
+            dumpNode(node.getChild(i), depth + 1, counts, editableIds);
         }
     }
 

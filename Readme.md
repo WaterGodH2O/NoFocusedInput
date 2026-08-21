@@ -100,15 +100,3 @@ adb shell "am broadcast -n com.example.nofocusinput/.DemoBroadcastReceiver -a co
 # 我没域名，使用了example.com
 
 
-adb shell "am broadcast -n com.example.nofocusinput/.DemoBroadcastReceiver -a com.example.nofocusinput.ACTION_TOGGLE_IME_HIDDEN"
-切换键盘可用性
-
-
-
-
-
-scrcpy --new-display --no-vd-system-decorations --start-app=com.huawei.calendar
-
-
-
-python main.py --base-url https://open.bigmodel.cn/api/paas/v4 --model "autoglm-phone" --apikey bb3acbb12dff4e199ba83a04cc5e387e.OKtOpsZCEfT9I3Fm

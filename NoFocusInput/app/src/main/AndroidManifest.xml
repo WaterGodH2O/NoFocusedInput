@@ -30,6 +30,8 @@
                 <action android:name="com.example.nofocusinput.ACTION_DEMO_BROADCAST" />
                 <action android:name="com.example.nofocusinput.ACTION_DUMP_NODES" />
                 <action android:name="com.example.nofocusinput.ACTION_SET_TEXT" />
+                <action android:name="com.example.nofocusinput.ACTION_SET_TEXT_BY_POINT" />
+                <action android:name="com.example.nofocusinput.ACTION_TOGGLE_IME_HIDDEN" />
             </intent-filter>
         </receiver>
 

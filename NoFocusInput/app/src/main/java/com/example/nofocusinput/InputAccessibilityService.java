@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.SparseArray;
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -22,6 +23,7 @@ public class InputAccessibilityService extends AccessibilityService {
     private static final String TAG = "InputA11y";
     private static final String DUMP_TAG = "NodeDump";
     private static final String SET_TAG = "SetText";
+    private static final String IME_TAG = "ImeMode";
 
     private static InputAccessibilityService instance;
     private static boolean dumpAllDisplays = true;
@@ -63,6 +65,37 @@ public class InputAccessibilityService extends AccessibilityService {
     }
 
     /**
+     * 在 SHOW_MODE_HIDDEN 与 SHOW_MODE_AUTO 之间切换，并打出切换前后的状态。
+     */
+    public static void toggleSoftKeyboardHidden() {
+        InputAccessibilityService service = instance;
+        if (service == null) {
+            Log.w(IME_TAG, "skip toggle IME: accessibility service not connected");
+            return;
+        }
+        AccessibilityService.SoftKeyboardController ime = service.getSoftKeyboardController();
+        int current = ime.getShowMode();
+        int next = current == SHOW_MODE_HIDDEN ? SHOW_MODE_AUTO : SHOW_MODE_HIDDEN;
+        boolean ok = ime.setShowMode(next);
+        int applied = ime.getShowMode();
+        Log.i(IME_TAG, "softKeyboardShowMode " + modeName(current) + " -> " + modeName(applied)
+                + " hidden=" + (applied == SHOW_MODE_HIDDEN) + " ok=" + ok);
+    }
+
+    private static String modeName(int mode) {
+        switch (mode) {
+            case SHOW_MODE_AUTO:
+                return "AUTO";
+            case SHOW_MODE_HIDDEN:
+                return "HIDDEN";
+            case SHOW_MODE_IGNORE_HARD_KEYBOARD:
+                return "IGNORE_HARD_KEYBOARD";
+            default:
+                return "UNKNOWN(" + mode + ")";
+        }
+    }
+
+    /**
      * 对外入口：无障碍服务已连接时，把当前屏幕上可写入的节点打到 Logcat。
      * @return 可 SET_TEXT 且带完整资源 id 的控件列表（pkg:id/name）；服务未连接时返回空列表。
      */
@@ -92,6 +125,20 @@ public class InputAccessibilityService extends AccessibilityService {
             return;
         }
         service.setTextByViewIdInternal(viewId, text == null ? "" : text);
+    }
+
+    /**
+     * 按屏幕坐标找到可写入节点并设置文本。
+     * (x, y) 与 {@link AccessibilityNodeInfo#getBoundsInScreen} 同一套像素坐标，属于 displayId 这块屏。
+     * displayId 用 {@link Display#DEFAULT_DISPLAY} 表示主屏，其它值只扫对应那块屏。
+     */
+    public static void setTextByPoint(int x, int y, int displayId, String text) {
+        InputAccessibilityService service = instance;
+        if (service == null) {
+            Log.w(SET_TAG, "skip setTextByPoint: accessibility service not connected");
+            return;
+        }
+        service.setTextByPointInternal(x, y, displayId, text == null ? "" : text);
     }
 
     /**
@@ -310,6 +357,179 @@ public class InputAccessibilityService extends AccessibilityService {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+    }
+
+    /**
+     * 在 displayId 这块屏上命中包含 (x, y) 的可写入节点。
+     * 不按窗口矩形预过滤：部分机型 window bounds 是空的或和节点 bounds 不在同一套坐标。
+     */
+    private void setTextByPointInternal(int x, int y, int displayId, String text) {
+        Log.i(SET_TAG, "setTextByPoint x=" + x + " y=" + y
+                + " displayId=" + displayId + " text=" + quote(text));
+        AccessibilityNodeInfo target = findWritableAtOnDisplay(displayId, x, y);
+        if (target == null) {
+            Log.w(SET_TAG, "done byPoint x=" + x + " y=" + y
+                    + " displayId=" + displayId + " matched=0 written=0");
+            return;
+        }
+        Log.i(SET_TAG, "matched " + formatNode(target, 0));
+        if (performSetText(target, text)) {
+            Log.i(SET_TAG, "written id=" + target.getViewIdResourceName());
+            Log.i(SET_TAG, "done byPoint x=" + x + " y=" + y
+                    + " displayId=" + displayId + " matched=1 written=1");
+        } else {
+            Log.w(SET_TAG, "performAction failed id=" + target.getViewIdResourceName());
+            Log.w(SET_TAG, "done byPoint x=" + x + " y=" + y
+                    + " displayId=" + displayId + " matched=1 written=0");
+        }
+    }
+
+    private AccessibilityNodeInfo findWritableAtOnDisplay(int displayId, int x, int y) {
+        List<AccessibilityWindowInfo> windows = windowsOnDisplay(displayId);
+        int windowCount = windows == null ? 0 : windows.size();
+        Log.i(SET_TAG, "scan displayId=" + displayId + " windows=" + windowCount);
+        AccessibilityNodeInfo found = findWritableAtInWindowList(windows, x, y);
+        if (found != null) {
+            return found;
+        }
+        if (displayId == Display.DEFAULT_DISPLAY) {
+            Log.i(SET_TAG, "no window-list hit, fallback to active root");
+            return findWritableAtInTree(getRootInActiveWindow(), x, y);
+        }
+        return null;
+    }
+
+    /**
+     * 主屏走 {@link #getWindows()}；其它屏按 displayId 从 {@link #getWindowsOnAllDisplays()} 取。
+     */
+    private List<AccessibilityWindowInfo> windowsOnDisplay(int displayId) {
+        if (displayId == Display.DEFAULT_DISPLAY) {
+            return getWindows();
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.w(SET_TAG, "displayId requires API 30, skip displayId=" + displayId);
+            return null;
+        }
+        SparseArray<List<AccessibilityWindowInfo>> byDisplay = getWindowsOnAllDisplays();
+        if (byDisplay != null && byDisplay.size() > 0) {
+            List<AccessibilityWindowInfo> windows = byDisplay.get(displayId);
+            if (windows != null && !windows.isEmpty()) {
+                return windows;
+            }
+            Log.w(SET_TAG, "displayId=" + displayId + " has no windows, available="
+                    + availableDisplayIds(byDisplay));
+        }
+        return windowsWithDisplayId(getWindows(), displayId);
+    }
+
+    private static String availableDisplayIds(SparseArray<List<AccessibilityWindowInfo>> byDisplay) {
+        StringBuilder ids = new StringBuilder("[");
+        for (int i = 0; i < byDisplay.size(); i++) {
+            if (i > 0) {
+                ids.append(',');
+            }
+            ids.append(byDisplay.keyAt(i));
+        }
+        return ids.append(']').toString();
+    }
+
+    private static List<AccessibilityWindowInfo> windowsWithDisplayId(
+            List<AccessibilityWindowInfo> windows, int displayId) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || windows == null || windows.isEmpty()) {
+            return null;
+        }
+        List<AccessibilityWindowInfo> matched = new ArrayList<>();
+        for (int i = 0; i < windows.size(); i++) {
+            AccessibilityWindowInfo window = windows.get(i);
+            if (window != null && window.getDisplayId() == displayId) {
+                matched.add(window);
+            }
+        }
+        return matched.isEmpty() ? null : matched;
+    }
+
+    /** 窗口按 Z 序从前到后；命中最前层里包含该点的可写入节点。 */
+    private AccessibilityNodeInfo findWritableAtInWindowList(List<AccessibilityWindowInfo> windows,
+            int x, int y) {
+        if (windows == null || windows.isEmpty()) {
+            return null;
+        }
+        AccessibilityNodeInfo found = findWritableAtInWindowList(windows, x, y, true);
+        if (found != null) {
+            return found;
+        }
+        Log.i(SET_TAG, "no visibleToUser match, retry including hidden nodes");
+        return findWritableAtInWindowList(windows, x, y, false);
+    }
+
+    private AccessibilityNodeInfo findWritableAtInWindowList(List<AccessibilityWindowInfo> windows,
+            int x, int y, boolean visibleOnly) {
+        for (int i = 0; i < windows.size(); i++) {
+            AccessibilityWindowInfo window = windows.get(i);
+            if (window == null) {
+                continue;
+            }
+            AccessibilityNodeInfo found = findWritableAtInTree(window.getRoot(), x, y, visibleOnly);
+            if (found != null) {
+                String displayPart = "";
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    displayPart = " displayId=" + window.getDisplayId();
+                }
+                Log.i(SET_TAG, "hit window[" + i + "] type=" + window.getType()
+                        + " title=" + window.getTitle()
+                        + " active=" + window.isActive()
+                        + displayPart);
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findWritableAtInTree(AccessibilityNodeInfo node, int x, int y) {
+        AccessibilityNodeInfo found = findWritableAtInTree(node, x, y, true);
+        if (found != null) {
+            return found;
+        }
+        return findWritableAtInTree(node, x, y, false);
+    }
+
+    /** 在包含 (x, y) 的可写入节点里取面积最小的一个。 */
+    private AccessibilityNodeInfo findWritableAtInTree(AccessibilityNodeInfo node, int x, int y,
+            boolean visibleOnly) {
+        NodeHit hit = new NodeHit();
+        collectWritableAt(node, x, y, hit, visibleOnly);
+        return hit.node;
+    }
+
+    private void collectWritableAt(AccessibilityNodeInfo node, int x, int y, NodeHit hit,
+            boolean visibleOnly) {
+        if (node == null) {
+            return;
+        }
+        if (canSetText(node) && (!visibleOnly || node.isVisibleToUser())) {
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            if (pointInBounds(bounds, x, y)) {
+                int area = bounds.width() * bounds.height();
+                if (area > 0 && area < hit.area) {
+                    hit.node = node;
+                    hit.area = area;
+                }
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectWritableAt(node.getChild(i), x, y, hit, visibleOnly);
+        }
+    }
+
+    /** 点击坐标按闭区间，避免落在 Rect.contains 右侧/下侧开边界上时 miss。 */
+    private static boolean pointInBounds(Rect bounds, int x, int y) {
+        return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+    }
+
+    private static final class NodeHit {
+        AccessibilityNodeInfo node;
+        int area = Integer.MAX_VALUE;
     }
 
     private static String normalizeViewId(String viewId) {

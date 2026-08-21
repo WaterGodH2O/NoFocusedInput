@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
 
 import java.util.ArrayList;
 
@@ -18,8 +19,23 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
      */
     public static final String ACTION_EDITABLE_IDS = "com.example.nofocusinput.ACTION_EDITABLE_IDS";
     public static final String ACTION_SET_TEXT = "com.example.nofocusinput.ACTION_SET_TEXT";
+    /** 按屏幕坐标找到可写入节点并 SET_TEXT。 */
+    public static final String ACTION_SET_TEXT_BY_POINT =
+            "com.example.nofocusinput.ACTION_SET_TEXT_BY_POINT";
+    /** 翻转软键盘隐藏：SHOW_MODE_HIDDEN ↔ SHOW_MODE_AUTO。 */
+    public static final String ACTION_TOGGLE_IME_HIDDEN =
+            "com.example.nofocusinput.ACTION_TOGGLE_IME_HIDDEN";
     public static final String EXTRA_TEXT = "text";
     public static final String EXTRA_VIEW_ID = "id";
+    /** {@link #ACTION_SET_TEXT_BY_POINT} 的屏幕 X 坐标（像素）。 */
+    public static final String EXTRA_X = "x";
+    /** {@link #ACTION_SET_TEXT_BY_POINT} 的屏幕 Y 坐标（像素）。 */
+    public static final String EXTRA_Y = "y";
+    /**
+     * {@link #ACTION_SET_TEXT_BY_POINT} 的逻辑屏 id，与 dump 日志里的 displayId 相同。
+     * 省略或空字符串时使用主屏 {@link Display#DEFAULT_DISPLAY}（0）。
+     */
+    public static final String EXTRA_DISPLAY_ID = "displayId";
     /** {@link #ACTION_EDITABLE_IDS} 携带的完整资源 id 列表。 */
     public static final String EXTRA_VIEW_IDS = "ids";
     public static final String EXTRA_ALL_DISPLAYS = "allDisplays";
@@ -53,6 +69,11 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
                     intent.getBooleanExtra(EXTRA_ALL_DISPLAYS, false));
         }
 
+        if (ACTION_TOGGLE_IME_HIDDEN.equals(action)) {
+            InputAccessibilityService.toggleSoftKeyboardHidden();
+            return;
+        }
+
         // 按 id 找到输入框并写入 text，不更新本 App 的 Demo 输入框
         if (ACTION_SET_TEXT.equals(action)) {
             String viewId = intent.getStringExtra(EXTRA_VIEW_ID);
@@ -66,6 +87,25 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
             }
             String text = readPayload(intent);
             InputAccessibilityService.setTextByViewId(viewId, text);
+            return;
+        }
+
+        // 按屏幕坐标命中可写入节点并写入 text
+        if (ACTION_SET_TEXT_BY_POINT.equals(action)) {
+            Integer x = readCoord(intent, EXTRA_X);
+            Integer y = readCoord(intent, EXTRA_Y);
+            if (x == null || y == null) {
+                Log.w(TAG, "skip setTextByPoint: missing extra x or y");
+                return;
+            }
+            if (!intent.hasExtra(EXTRA_TEXT)) {
+                Log.w(TAG, "skip setTextByPoint: missing extra text");
+                return;
+            }
+            String text = readPayload(intent);
+            int displayId = readDisplayId(intent);
+            Log.i(TAG, "setTextByPoint x=" + x + " y=" + y + " displayId=" + displayId);
+            InputAccessibilityService.setTextByPoint(x, y, displayId, text);
             return;
         }
 
@@ -105,6 +145,52 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
         context.sendBroadcast(out);
         Log.i(TAG, "sent " + ACTION_EDITABLE_IDS + " count=" + editableIds.size()
                 + " ids=" + editableIds);
+    }
+
+    /** 省略、空字符串或无法解析时落到主屏。 */
+    private static int readDisplayId(Intent intent) {
+        Bundle extras = intent.getExtras();
+        if (extras == null || !extras.containsKey(EXTRA_DISPLAY_ID)) {
+            return Display.DEFAULT_DISPLAY;
+        }
+        Object raw = extras.get(EXTRA_DISPLAY_ID);
+        if (raw == null) {
+            return Display.DEFAULT_DISPLAY;
+        }
+        if (raw instanceof Number) {
+            return ((Number) raw).intValue();
+        }
+        String value = String.valueOf(raw).trim();
+        if (value.isEmpty()) {
+            return Display.DEFAULT_DISPLAY;
+        }
+        try {
+            return (int) Float.parseFloat(value);
+        } catch (NumberFormatException e) {
+            Log.w(TAG, "invalid displayId=" + raw + ", fallback to default display");
+            return Display.DEFAULT_DISPLAY;
+        }
+    }
+
+    /** 读整数或浮点 extra，截成屏幕像素；缺省或无法解析时返回 null。 */
+    private static Integer readCoord(Intent intent, String key) {
+        Bundle extras = intent.getExtras();
+        if (extras == null || !extras.containsKey(key)) {
+            return null;
+        }
+        Object raw = extras.get(key);
+        if (raw instanceof Number) {
+            return ((Number) raw).intValue();
+        }
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return (int) Float.parseFloat(String.valueOf(raw));
+        } catch (NumberFormatException e) {
+            Log.w(TAG, "skip setTextByPoint: extra " + key + " is not a number: " + raw);
+            return null;
+        }
     }
 
     private static String readPayload(Intent intent) {

@@ -9,6 +9,12 @@
 
     <string name="placeholder_text">Placeholder Text</string>
     <string name="button_show_alert">打开无障碍设置</string>
+    <string name="button_ime_overlay">开启键盘悬浮窗</string>
+    <string name="button_ime_overlay_on">开启键盘悬浮窗</string>
+    <string name="button_ime_overlay_close">关闭键盘悬浮窗</string>
+    <string name="overlay_keyboard_on">暂停</string>
+    <string name="overlay_keyboard_off">运行中</string>
+    <string name="ime_overlay_need_a11y">请先开启无障碍服务「无焦点输入」</string>
     <string name="broadcast_hint">等待 ADB 广播…</string>
     <string name="accessibility_service_label">无焦点输入</string>
     <string name="accessibility_service_description">用于向其他应用的输入框写入文本。开启后可读取当前屏幕上的控件信息。</string>

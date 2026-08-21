@@ -25,6 +25,9 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
     /** 翻转软键盘隐藏：SHOW_MODE_HIDDEN ↔ SHOW_MODE_AUTO。 */
     public static final String ACTION_TOGGLE_IME_HIDDEN =
             "com.example.nofocusinput.ACTION_TOGGLE_IME_HIDDEN";
+    /** 只读查询软键盘是否隐藏，结果经 {@link #setResultData} 返回 {@code true}/{@code false}。 */
+    public static final String ACTION_QUERY_IME_HIDDEN =
+            "com.example.nofocusinput.ACTION_QUERY_IME_HIDDEN";
     public static final String EXTRA_TEXT = "text";
     public static final String EXTRA_VIEW_ID = "id";
     /** {@link #ACTION_SET_TEXT_BY_POINT} 的屏幕 X 坐标（像素）。 */
@@ -63,6 +66,14 @@ public class DemoBroadcastReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
         Log.i(TAG, "received action=" + action + " serviceRunning=" + InputAccessibilityService.isRunning());
+
+        if (ACTION_QUERY_IME_HIDDEN.equals(action)) {
+            boolean imeHidden = InputAccessibilityService.isImeHidden();
+            setResultCode(-1);
+            setResultData(imeHidden ? "true" : "false");
+            Log.i(TAG, "query IME hidden=" + imeHidden);
+            return;
+        }
 
         if (intent.hasExtra(EXTRA_ALL_DISPLAYS)) {
             InputAccessibilityService.setDumpAllDisplays(

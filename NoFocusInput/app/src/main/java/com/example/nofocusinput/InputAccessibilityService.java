@@ -27,6 +27,9 @@ public class InputAccessibilityService extends AccessibilityService {
 
     private static InputAccessibilityService instance;
     private static boolean dumpAllDisplays = true;
+    /** 软键盘是否允许显示：非 {@link #SHOW_MODE_HIDDEN} 即为可见。 */
+    private static boolean keyboardVisible = true;
+    private ImeOverlay imeOverlay;
 
     public static void setDumpAllDisplays(boolean allDisplays) {
         dumpAllDisplays = allDisplays;
@@ -49,11 +52,13 @@ public class InputAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
-        Log.i(TAG, "service connected");
+        keyboardVisible = isImeAllowedVisible(getSoftKeyboardController().getShowMode());
+        Log.i(TAG, "service connected keyboardVisible=" + keyboardVisible);
     }
 
     @Override
     public void onDestroy() {
+        hideImeOverlayInternal();
         if (instance == this) {
             instance = null;
         }
@@ -64,8 +69,53 @@ public class InputAccessibilityService extends AccessibilityService {
         return instance != null;
     }
 
+    /** 软键盘当前是否允许显示（SHOW_MODE 非 HIDDEN）。 */
+    public static boolean isKeyboardVisible() {
+        return keyboardVisible;
+    }
+
     /**
-     * 在 SHOW_MODE_HIDDEN 与 SHOW_MODE_AUTO 之间切换，并打出切换前后的状态。
+     * 软键盘是否处于隐藏（SHOW_MODE_HIDDEN）。
+     * 与 {@link #toggleSoftKeyboardHidden()} 读同一份状态，只读不改。
+     */
+    public static boolean isImeHidden() {
+        InputAccessibilityService service = instance;
+        if (service != null) {
+            return !isImeAllowedVisible(service.getSoftKeyboardController().getShowMode());
+        }
+        return !keyboardVisible;
+    }
+
+    public static boolean isImeOverlayShowing() {
+        return instance != null && instance.imeOverlay != null && instance.imeOverlay.isShowing();
+    }
+
+    /**
+     * 弹出键盘控制悬浮窗，并把 IME 设为可见（SHOW_MODE_AUTO）。
+     * @return 无障碍服务未连接时返回 false。
+     */
+    public static boolean showImeOverlay() {
+        InputAccessibilityService service = instance;
+        if (service == null) {
+            Log.w(IME_TAG, "skip show overlay: accessibility service not connected");
+            return false;
+        }
+        service.setKeyboardVisible(true);
+        if (service.imeOverlay == null) {
+            service.imeOverlay = new ImeOverlay(service);
+        }
+        service.imeOverlay.show();
+        return true;
+    }
+
+    public static void hideImeOverlay() {
+        if (instance != null) {
+            instance.hideImeOverlayInternal();
+        }
+    }
+
+    /**
+     * 在 SHOW_MODE_HIDDEN 与 SHOW_MODE_AUTO 之间切换，并更新 {@link #keyboardVisible}。
      */
     public static void toggleSoftKeyboardHidden() {
         InputAccessibilityService service = instance;
@@ -73,13 +123,32 @@ public class InputAccessibilityService extends AccessibilityService {
             Log.w(IME_TAG, "skip toggle IME: accessibility service not connected");
             return;
         }
-        AccessibilityService.SoftKeyboardController ime = service.getSoftKeyboardController();
+        boolean visible = isImeAllowedVisible(service.getSoftKeyboardController().getShowMode());
+        service.setKeyboardVisible(!visible);
+    }
+
+    private void hideImeOverlayInternal() {
+        if (imeOverlay != null) {
+            imeOverlay.hide();
+        }
+    }
+
+    private void setKeyboardVisible(boolean visible) {
+        SoftKeyboardController ime = getSoftKeyboardController();
         int current = ime.getShowMode();
-        int next = current == SHOW_MODE_HIDDEN ? SHOW_MODE_AUTO : SHOW_MODE_HIDDEN;
+        int next = visible ? SHOW_MODE_AUTO : SHOW_MODE_HIDDEN;
         boolean ok = ime.setShowMode(next);
         int applied = ime.getShowMode();
+        keyboardVisible = isImeAllowedVisible(applied);
         Log.i(IME_TAG, "softKeyboardShowMode " + modeName(current) + " -> " + modeName(applied)
-                + " hidden=" + (applied == SHOW_MODE_HIDDEN) + " ok=" + ok);
+                + " visible=" + keyboardVisible + " ok=" + ok);
+        if (imeOverlay != null) {
+            imeOverlay.refreshLabel();
+        }
+    }
+
+    private static boolean isImeAllowedVisible(int showMode) {
+        return showMode != SHOW_MODE_HIDDEN;
     }
 
     private static String modeName(int mode) {

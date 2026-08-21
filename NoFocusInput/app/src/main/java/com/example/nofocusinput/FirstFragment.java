@@ -6,6 +6,7 @@ import android.provider.Settings;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
@@ -39,6 +40,20 @@ public class FirstFragment extends Fragment {
         binding.buttonShowAlert.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         );
+
+        binding.buttonImeOverlay.setOnClickListener(v -> {
+            if (InputAccessibilityService.isImeOverlayShowing()) {
+                InputAccessibilityService.hideImeOverlay();
+                refreshImeOverlayButton();
+                return;
+            }
+            if (!InputAccessibilityService.showImeOverlay()) {
+                Toast.makeText(requireContext(), R.string.ime_overlay_need_a11y, Toast.LENGTH_SHORT)
+                        .show();
+                return;
+            }
+            refreshImeOverlayButton();
+        });
     }
 
     @Override
@@ -62,6 +77,16 @@ public class FirstFragment extends Fragment {
         if (lastText != null) {
             binding.editBroadcast.setText(lastText);
         }
+        refreshImeOverlayButton();
+    }
+
+    private void refreshImeOverlayButton() {
+        if (binding == null) {
+            return;
+        }
+        binding.buttonImeOverlay.setText(InputAccessibilityService.isImeOverlayShowing()
+                ? R.string.button_ime_overlay_close
+                : R.string.button_ime_overlay_on);
     }
 
     @Override

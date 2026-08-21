@@ -1,5 +1,5 @@
 # NoFocusInput
-
+工具APP，配合Agent执行一些安卓端的操作
 通过无障碍服务读取当前界面控件树，找出支持 `ACTION_SET_TEXT` 的输入框，再用 ADB 广播写入文本。可按控件 `id` 或屏幕坐标指定目标。写入时不抢设备焦点、不唤起输入法。
 
 ## 使用前
@@ -7,6 +7,9 @@
 1. 安装并打开本 App。
 2. 在系统设置中开启无障碍服务 **无焦点输入**（App 内可点「打开无障碍设置」）。
 3. 目标输入框需出现在屏幕或任何扩展屏幕上（可无焦点）。
+4. 悬浮窗用于启用和禁用键盘，配合项目  {}  使用，允许用户暂停agent的操作并使用键盘
+
+
 
 查看相关日志：
 
@@ -96,7 +99,7 @@ adb shell "am broadcast -n com.example.nofocusinput/.DemoBroadcastReceiver -a co
 - 广播结果看 Logcat 的 `SetText` tag：`matched` / `written` 表示是否找到并写入成功。
 
 
-# 包含了项目 github.com/Genymobile/scrcpy 用于测试
-# 我没域名，使用了example.com
+### 包含了项目 github.com/Genymobile/scrcpy 用于测试
+### 我没域名，使用了example.com
 
 
